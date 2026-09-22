@@ -1,0 +1,8 @@
+rc1_music_fix:
+  attributes: 0x0
+  version:
+    major: 0x1
+    minor: 0x0
+  main:
+    start: module_start
+    stop: module_stop

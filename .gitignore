@@ -1,0 +1,5 @@
+*.elf
+*.velf
+*.o
+*.log
+!rc1_music_fix.suprx

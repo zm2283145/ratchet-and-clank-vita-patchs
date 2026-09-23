@@ -1,5 +1,21 @@
+# Build intermediates and private hardware captures.
 *.elf
 *.velf
 *.o
 *.log
-!rc1_music_fix.suprx
+/config.*
+
+# Superseded standalone and diagnostic plugins remain local for comparison.
+/rc1_music_fix.c
+/rc1_music_fix.suprx
+/build.ps1
+/exports.yml
+/rc1_weapon_audio_fix.c
+/rc1_weapon_audio_fix.suprx
+/build_weapon_audio_fix.ps1
+/exports_weapon_audio_fix.yml
+/rc1_audio_probe.suprx
+/rc1_weapon_audio_probe.c
+/rc1_weapon_audio_probe.suprx
+/build_probe.ps1
+/exports_probe.yml

@@ -1,99 +1,151 @@
-# Ratchet & Clank Vita patches
+# Ratchet & Clank Collection Vita patches
 
-Community patches for the PS Vita *Ratchet & Clank Collection*. The current `rc1_audio_fixes.suprx` combines the RC1 music crossfade, music-loop startup, and looping sound-effect fixes for Ratchet & Clank 1 (USA, `PCSA00133`). It also retains the Tesla Claw/Morph-o-Ray release cleanup. Future fixes for the collection may be added after separate testing.
+A taiHEN plugin containing hardware-tested fixes and replacement-file support
+for the USA PS Vita release of *Ratchet & Clank Collection* (`PCSA00133`).
 
-## RC1 music transition fix
+## Features
 
-### Original bug and diagnosis
+- Corrects Ratchet & Clank 1 music transitions while preserving crossfades.
+- Reduces the long silence between streamed-audio loop restarts in RC1.
+- Stops Tesla Claw and Morph-o-Ray audio that can continue after firing ends.
+- Prevents duplicate starting-state voices for looping sound objects throughout
+  RC1. The Veldin elevator and Kerwan helicopter are confirmed examples, but
+  the fix operates on the game's shared looping-audio path rather than on
+  those two objects specifically.
+- Displays pre-rendered movies fullscreen and centered in RC1, RC2, and RC3.
+- Loads loose replacement files for all three games without rebuilding a
+  PSARC archive.
 
-On the unpatched Vita port, RC1 can keep repeating the music from the first area loaded on a planet instead of changing tracks when Ratchet crosses into another music area. Crossing additional boundaries can briefly double the loop, then leave the game silent. A notable clue from hardware testing: after crossing two music-change thresholds, playing a cutscene caused the *correct track for the current area* to start when the cutscene ended. This suggests the cutscene return path reinitializes or resynchronizes music state; it does not establish exactly which internal function does so.
+The plugin identifies each supported executable by its segment sizes and
+verifies original instructions before applying game-code patches. Audio fixes
+are RC1-specific. Loose-file overlays remain registered while the collection
+switches between its three executables.
 
-We first tested a simpler runtime workaround that reset the music manager and started the destination track immediately. It stopped the stuck-loop behavior, but made every transition a hard cut. The final patch keeps the game's original crossfade path. Analysis showed that a transition request carries both the destination area's long-running track and a short bridge cue. The port failed to promote the destination track into the primary music slot. A separate transition latch could then remain set after the secondary stream completed, blocking the next boundary crossing. The plugin promotes the destination track while preserving the bridge cue, and clears that latch only after the secondary stream has finished. It does not restart the track or throw away a queued transition.
+## Installation
 
-The crossfade fix was confirmed on hardware with VitaCheat first: music changed in both directions and continued looping. The same patch bytes were then loaded with an earlier standalone plugin; runtime address `0x81124226` was observed patched with VitaCheat's music code disabled, and gameplay testing confirmed the music issue was fixed. The combined plugin contains those same patch bytes.
+1. Install taiHEN-compatible custom firmware and back up the active
+   `ur0:tai/config.txt`.
+2. Copy `rc1_audio_fixes.suprx` to:
 
-The original stream constructor also opens, checks, and closes each audio file before requesting its actual asynchronous playback stream. Skipping that redundant preflight removed almost all of the roughly one-second silence between loops in hardware tests with VitaCheat. Area changes continued working and a second area's loop had no noticeable delay. A brief restart seam remains on some tracks. The combined plugin includes the same four-byte change. The skipped check applies to all streamed audio in RC1, not just music; the actual asynchronous open and its error handling remain in place.
+   ```text
+   ur0:tai/rc1_audio_fixes.suprx
+   ```
 
-The plugin is configured under the collection's title ID, but checks the loaded executable's segment size and original bytes before writing. It does nothing when the launcher, RC2, RC3, or an unrecognized RC1 revision is running. It is specific to the USA `PCSA00133` RC1 executable whose decrypted ELF has SHA-256 `DA03DDFE0B20A0C61CFF471772D14916FA6DA5C64597D7E4C3B9141A60485636`.
-
-### Install
-
-1. Back up your active taiHEN `config.txt`.
-2. Copy [`rc1_audio_fixes.suprx`](rc1_audio_fixes.suprx) to `ur0:tai/rc1_audio_fixes.suprx`.
-3. Add the following to the active taiHEN config (typically `ur0:tai/config.txt`), using the existing `*PCSA00133` section if one is already present:
+3. Add the plugin beneath the existing title section, or create it if needed:
 
    ```text
    *PCSA00133
    ur0:tai/rc1_audio_fixes.suprx
    ```
 
-4. Remove entries for older standalone audio plugins, `rc1_state7_audio_test.suprx`, and RC1 audio diagnostic probes. Disable overlapping VitaCheat RC1 audio codes, then fully close and relaunch the game (or reboot).
+4. Remove entries for superseded versions of this plugin, refresh taiHEN, and
+   reboot the Vita.
 
-To uninstall, remove only the `ur0:tai/rc1_audio_fixes.suprx` line from the config, refresh taiHEN or reboot, then remove the plugin file. Do not overwrite the game's installed SELF.
+The release binary is 24,650 bytes and has SHA-256:
 
-The current combined plugin binary has SHA-256 `32DB33CEE2F71AFD006A850AF6F1E4B50721C7334346C73E7939020DC974D722`.
+```text
+4AB0DAA258A403524E0CE5C0DD06406A9974DF1074D9CF4169EF7A68337584F8
+```
 
-### Build from source
+## Loose-file replacements
 
-Install VitaSDK with taiHEN headers/stubs, then run `./build_audio_fixes.ps1` in PowerShell. Set `VITASDK` if the SDK is not in `C:\vitasdk`. The build script produces `rc1_audio_fixes.elf`, `rc1_audio_fixes.velf`, and `rc1_audio_fixes.suprx` from [`rc1_audio_fixes.c`](rc1_audio_fixes.c) and [`exports_audio_fixes.yml`](exports_audio_fixes.yml).
+Place a file below the appropriate directory using the same relative path and
+filename it has inside that game's PSARC:
 
-## RC1 Tesla Claw and Morph-o-Ray release fix
+```text
+ux0:data/rc_override/rc1/<path inside rc1.psarc>
+ux0:data/rc_override/rc2/<path inside rc2.psarc>
+ux0:data/rc_override/rc3/<path inside rc3.psarc>
+```
 
-Hardware traces confirmed that the Tesla Claw's looping sound (`ID 4`) and the
-Morph-o-Ray's looping sound (`ID 0`) can remain in the playing state after the
-fire button is released. The game eventually stops each stale voice during a
-weapon switch. The Pyrocitor follows its normal stop path and is not affected.
+For example, RC1's logo movie can be replaced with:
 
-The weapon portion of `rc1_audio_fixes.suprx` watches only looping `ID 0` and `ID 4` SFX slots
-created while CIRCLE is held. After release it gives the game 40 ms to perform
-its normal cleanup. If the exact same slot, voice, owner, flags, and sound ID
-are still active, the plugin requests the same state transition used by RC1's
-native stop routine. Slots that shut down normally or are reused during the
-grace period are left untouched.
+```text
+ux0:data/rc_override/rc1/psp2data/movies/logo_movie.bik
+```
 
-The combined plugin checks the recognized RC1 executable segment sizes and
-original music-code bytes before acting. It does nothing in the launcher,
-RC2, or RC3. These checks are for this USA executable revision and do not
-establish compatibility with other revisions.
+If a loose file is absent, the game reads the original PSARC normally. The
+plugin does not modify the installed archives. Overlay registration results
+are written to `ux0:data/rc_loose_override.log`.
 
-Hardware testing of the earlier plugin setup confirmed that it stops the
-Tesla Claw and Morph-o-Ray sounds after release. The combined binary contains
-the same cleanup logic.
+## Higher-quality PS3 movie replacements
 
-## RC1 elevator and other repeating sound effects
+The PS3 collection's RC1 movies can be converted to a Vita-friendly Bink 1
+format and loaded through the loose-file system. The movies are not distributed
+with this project. You must provide files extracted from your own PS3 copy.
 
-The first Veldin elevator and Kerwan's first helicopter exposed a second,
-more general sound bug. A sound slot in state `7` is *starting*, but RC1's
-"already playing?" check only recognizes states `1` and `2`. If the same
-object starts its sound again during state `7`, RC1 can allocate a second
-looping voice and replace the object's remembered slot. Its later stop then
-reaches only the remembered voice; the earlier one keeps playing. This
-explains why the effect can persist until a reload or explicit cleanup.
+### Requirements
 
-The plugin hooks that existing check and treats state `7` as active **only
-when the slot belongs to the same object**. It otherwise leaves the original
-check unchanged. No sound definitions are muted, no continuous diagnostic
-logging is included, and the fix applies through RC1's shared sound path
-rather than a Veldin-specific address. In hardware tests with the same hook
-running as a separate quiet plugin, the Kerwan helicopter gun and the
-previously reproducible elevator loop stopped normally, including after
-leaving and returning to the area. Those tests support the shared fix, but
-do not prove every sound effect in every level is corrected.
+- A Windows PC.
+- Movie files from your own PS3 copy. RC1 stores them under
+  `PS3_GAME/USRDIR/rc1/ps3data/movies`.
+- The Bink 1-era RAD Video Tools 1.99i installer,
+  [`RADTools_1994i.exe`](https://www.videohelp.com/software?d=RADTools_1994i.exe).
+  This is the exact version tested by the conversion script. Newer packages
+  may expose different command-line tools or produce an incompatible format.
+- Enough free storage for the source files, converted files, and FTP transfer.
 
-## Scope and verification
+The output must be Bink 1 with the `BIKi` signature. Bink 2/`.bk2` files are
+not supported by the Vita games.
 
-The music crossfade and weapon fixes were confirmed on hardware in earlier
-plugin setups. The loop-startup improvement was confirmed with VitaCheat;
-a brief seam can still be audible on some tracks. The state-`7` hook was
-confirmed with a separate quiet plugin. This newly unified binary builds
-successfully, but should receive its own hardware check before being called
-fully verified. The low-quality, 4:3 FMVs are a separate issue.
+### Tested output settings
 
-The plugin checks the recognized RC1 executable's segment sizes and original
-code bytes before acting. It does nothing in the launcher, RC2, RC3, or an
-unrecognized RC1 revision. The weapon cleanup polls RC1 sound state while
-playing; the state-`7` hook itself does not run a polling thread.
+- 720 × 408
+- 30 frames per second
+- 48 kHz, 16-bit stereo audio
+- 300,000 bytes/second video data rate
+- Largest compressed frame below 65,536 bytes
 
-This repository contains no decrypted game executable, diagnostic logs,
-Vita configuration, or copyrighted game assets. You need your own copy of
-the game.
+The frame-size limit matters: larger frame spikes caused reproducible crashes
+on Vita hardware even when the file copied correctly. The included conversion
+script validates the Bink header, dimensions, frame rate, audio-track count,
+file length, and largest compressed frame.
+
+### Convert RC1's movies
+
+After installing RAD Video Tools 1.99i, run:
+
+```powershell
+.\convert_rc1_ps3_fmvs.ps1 `
+  -SourceRoot 'E:\PS3_GAME\USRDIR\rc1\ps3data\movies' `
+  -OutputRoot '.\converted\rc1\psp2data\movies'
+```
+
+Change the source path to match the mounted or extracted PS3 game. The script
+converts the 42 non-Japanese movie files referenced by the Vita RC1 archive and
+skips the unused `_j` variants.
+
+Copy the resulting directory to the Vita so the final layout is:
+
+```text
+ux0:data/rc_override/rc1/psp2data/movies/<original filename>.bik
+```
+
+Keep every filename unchanged. Restart the game after installing the plugin;
+individual movie replacements can then be added or updated without repacking
+`rc1.psarc`.
+
+## Building
+
+Install VitaSDK with its taiHEN and system-library stubs, then run:
+
+```powershell
+.\build_audio_fixes.ps1
+```
+
+Set `VITASDK` if the SDK is not installed at `C:\vitasdk`. The build combines:
+
+- `rc1_audio_fixes.c`
+- `rc_loose_overrides.c`
+- `rc_fmv_widescreen.c`
+- `rc1_combined_fixes.c`
+
+It produces `rc1_audio_fixes.elf`, `rc1_audio_fixes.velf`, and the installable
+`rc1_audio_fixes.suprx`.
+
+## Compatibility
+
+The patches were developed and tested with the USA `PCSA00133` release. Other
+regions or executable revisions are not currently supported. The repository
+and releases do not include decrypted executables, PSARC contents, or movie
+assets.

@@ -12,6 +12,10 @@ for the USA PS Vita release of *Ratchet & Clank Collection* (`PCSA00133`).
   RC1. The Veldin elevator and Kerwan helicopter are confirmed examples, but
   the fix operates on the game's shared looping-audio path rather than on
   those two objects specifically.
+- Reduces RC1's pending display queue from two frames to one, substantially
+  reducing the port's display-queue latency. Hardware measurements found a
+  median reduction from 123.06 ms to 51.02 ms between frame submission and
+  the display callback. This is not a complete button-to-screen measurement.
 - Displays pre-rendered movies fullscreen and centered in RC1, RC2, and RC3.
 - Loads loose replacement files for all three games without rebuilding a
   PSARC archive.
@@ -25,26 +29,36 @@ switches between its three executables.
 
 1. Install taiHEN-compatible custom firmware and back up the active
    `ur0:tai/config.txt`.
-2. Copy `rc1_audio_fixes.suprx` to:
+2. Install [`ioplus.skprx`](https://github.com/TeamFAPS/PSVita-RE-tools/blob/master/ioPlus/ioPlus-0.2/release/ioplus.skprx)
+   under `*KERNEL` and reboot. `ioplus` is required for the loose-file
+   replacement layer to access files under `ux0:data` from the retail game
+   process:
+
+   ```text
+   *KERNEL
+   ur0:tai/ioplus.skprx
+   ```
+
+3. Copy `rc1_audio_fixes.suprx` to:
 
    ```text
    ur0:tai/rc1_audio_fixes.suprx
    ```
 
-3. Add the plugin beneath the existing title section, or create it if needed:
+4. Add the plugin beneath the existing title section, or create it if needed:
 
    ```text
    *PCSA00133
    ur0:tai/rc1_audio_fixes.suprx
    ```
 
-4. Remove entries for superseded versions of this plugin, refresh taiHEN, and
+5. Remove entries for superseded versions of this plugin, refresh taiHEN, and
    reboot the Vita.
 
-The release binary is 24,650 bytes and has SHA-256:
+The release binary is 29,254 bytes and has SHA-256:
 
 ```text
-4AB0DAA258A403524E0CE5C0DD06406A9974DF1074D9CF4169EF7A68337584F8
+D910690FBCDAEB19AC1AB99FC87837FC1ABF6A14ACE43DA496832F51A1F9471A
 ```
 
 ## Loose-file replacements
@@ -136,6 +150,7 @@ Install VitaSDK with its taiHEN and system-library stubs, then run:
 Set `VITASDK` if the SDK is not installed at `C:\vitasdk`. The build combines:
 
 - `rc1_audio_fixes.c`
+- `rc1_input_latency_fix.c`
 - `rc_loose_overrides.c`
 - `rc_fmv_widescreen.c`
 - `rc1_combined_fixes.c`

@@ -158,6 +158,10 @@ Set `VITASDK` if the SDK is not installed at `C:\vitasdk`. The build combines:
 It produces `rc1_audio_fixes.elf`, `rc1_audio_fixes.velf`, and the installable
 `rc1_audio_fixes.suprx`.
 
+Pushes to `main` also run the GitHub Actions build. A successful run uploads
+the `.suprx` as a workflow artifact and creates a draft GitHub release for that
+commit. Review its version, tag, title, and notes before publishing it.
+
 ## Compatibility
 
 The patches were developed and tested with the USA `PCSA00133` release. Other

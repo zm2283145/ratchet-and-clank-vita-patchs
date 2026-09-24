@@ -1,0 +1,117 @@
+name: Build and draft release
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-draft-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: vitasdk/vitasdk:2026.08-20260813
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v5
+
+      - name: Build combined plugin
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          arm-vita-eabi-gcc \
+            -std=gnu11 -O2 -Wall -Wextra -Werror \
+            -fno-strict-aliasing -nostdlib \
+            -Wl,-e,module_start -Wl,-q \
+            -o dist/rc1_audio_fixes.elf \
+            rc1_combined_fixes.c \
+            -ltaihen_stub \
+            -lSceFios2_stub_weak \
+            -lSceLibc_stub_weak \
+            -lSceLibKernel_stub_weak \
+            -lSceKernelModulemgr_stub \
+            -lSceKernelThreadMgr_stub \
+            -lSceIofilemgr_stub \
+            -lSceCtrl_stub \
+            -lgcc
+          vita-elf-create \
+            -e exports_audio_fixes.yml \
+            dist/rc1_audio_fixes.elf \
+            dist/rc1_audio_fixes.velf
+          vita-make-fself \
+            dist/rc1_audio_fixes.velf \
+            dist/rc1_audio_fixes.suprx
+
+      - name: Record build metadata
+        id: metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s dist/rc1_audio_fixes.suprx
+          echo "sha256=$(sha256sum dist/rc1_audio_fixes.suprx | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+          echo "bytes=$(stat -c '%s' dist/rc1_audio_fixes.suprx)" >> "$GITHUB_OUTPUT"
+          echo "short_sha=${GITHUB_SHA:0:7}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rc1-audio-fixes-${{ steps.metadata.outputs.short_sha }}
+          path: dist/rc1_audio_fixes.suprx
+          if-no-files-found: error
+
+      - name: Create draft release
+        uses: actions/github-script@v8
+        env:
+          BUILD_SHA256: ${{ steps.metadata.outputs.sha256 }}
+          BUILD_BYTES: ${{ steps.metadata.outputs.bytes }}
+          BUILD_SHORT_SHA: ${{ steps.metadata.outputs.short_sha }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const { owner, repo } = context.repo;
+            const tag = `ci-${context.runNumber}-${process.env.BUILD_SHORT_SHA}`;
+            const name = `Draft build ${process.env.BUILD_SHORT_SHA}`;
+            const body = [
+              'Automated draft for a push to `main`.',
+              '',
+              `Commit: \`${context.sha}\``,
+              `Artifact size: ${process.env.BUILD_BYTES} bytes`,
+              `SHA-256: \`${process.env.BUILD_SHA256.toUpperCase()}\``,
+              '',
+              'Review and edit the version, tag, title, and release notes before publishing.'
+            ].join('\n');
+
+            const release = await github.rest.repos.createRelease({
+              owner,
+              repo,
+              tag_name: tag,
+              target_commitish: context.sha,
+              name,
+              body,
+              draft: true,
+              prerelease: false
+            });
+
+            const assetPath = 'dist/rc1_audio_fixes.suprx';
+            const data = fs.readFileSync(assetPath);
+            await github.rest.repos.uploadReleaseAsset({
+              owner,
+              repo,
+              release_id: release.data.id,
+              name: 'rc1_audio_fixes.suprx',
+              data,
+              headers: {
+                'content-type': 'application/octet-stream',
+                'content-length': data.length
+              }
+            });

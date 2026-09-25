@@ -1,0 +1,120 @@
+﻿// Copyright (C) 2018-2021, The Replanetizer Contributors.
+// Replanetizer is free software: you can redistribute it
+// and/or modify it under the terms of the GNU General Public
+// License as published by the Free Software Foundation,
+// either version 3 of the License, or (at your option) any later version.
+// Please see the LICENSE.md file for more details.
+
+using LibReplanetizer.Headers;
+using LibReplanetizer.LevelObjects;
+using LibReplanetizer.Models;
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Text;
+using static LibReplanetizer.DataFunctions;
+
+namespace LibReplanetizer.Parsers
+{
+    public class MissionParser : RatchetFileParser, IDisposable
+    {
+        MissionHeader missionHead;
+        GameType game;
+
+        public MissionParser(GameType game, string armorFile) : base(armorFile)
+        {
+            this.game = game;
+            missionHead = new MissionHeader(fileStream);
+        }
+
+        public List<Model> GetModels()
+        {
+            List<Model> models = new List<Model>();
+
+            byte[] mobyBlock = ReadBlock(fileStream, 0x10, missionHead.mobiesCount * 0x08);
+
+            List<Tuple<int, int>> modelData = new List<Tuple<int, int>>();
+            for (int i = 0; i < missionHead.mobiesCount; i++)
+            {
+                short modelID = ReadShort(mobyBlock, (i * 0x08) + 0x02);
+                int offset = ReadInt(mobyBlock, (i * 0x08) + 0x04);
+
+                modelData.Add(new Tuple<int, int>(offset, modelID));
+            }
+
+            foreach (Tuple<int, int> model in modelData)
+            {
+                // ID of zero implies that something wrong and this model is to be ignored.
+                if (model.Item2 != 0)
+                {
+                    models.Add(new MobyModel(fileStream, game, (short) model.Item2, model.Item1));
+                }
+            }
+
+            return models;
+        }
+
+        public List<Texture> GetTextures()
+        {
+            return GetTextures(missionHead.texturePointer, missionHead.textureCount);
+        }
+
+        public void Dispose()
+        {
+            fileStream.Close();
+        }
+    }
+
+    public class MissionDataParser : IDisposable
+    {
+        private FileStream fileStream;
+        private GameType game;
+
+        public MissionDataParser(string datFilePath, GameType game)
+        {
+            this.game = game;
+            this.fileStream = File.OpenRead(datFilePath);
+        }
+
+        public List<Moby> GetMobies(List<Model> missionModels, List<Model> levelModels)
+        {
+            byte[] fileHeader = ReadBlock(fileStream, 0x00, 0x20);
+            int mobyInstancesOffset = ReadInt(fileHeader, 0x04);
+
+            byte[] mobySecHeader = ReadBlock(fileStream, mobyInstancesOffset, 0x10);
+            int mobyCount = ReadInt(mobySecHeader, 0x00);
+
+            if (mobyCount <= 0 || mobyCount > 10000)
+                return new List<Moby>();
+
+            int mobyDataStart = mobyInstancesOffset + 0x10;
+            byte[] mobyBlock = ReadBlock(fileStream, mobyDataStart, mobyCount * 0x70);
+
+            List<Model> allModels = new List<Model>(missionModels);
+            foreach (var m in levelModels)
+                if (!allModels.Exists(x => x.id == m.id))
+                    allModels.Add(m);
+
+            var mobies = new List<Moby>();
+            for (int i = 0; i < mobyCount; i++)
+            {
+                int offset = i * 0x70;
+
+                // Null so the constructor doesnt try to index into an empty pvar list
+                mobyBlock[offset + 0x50] = 0xFF;
+                mobyBlock[offset + 0x51] = 0xFF;
+                mobyBlock[offset + 0x52] = 0xFF;
+                mobyBlock[offset + 0x53] = 0xFF;
+                Moby moby = new Moby(GameType.DL, mobyBlock, i, allModels, new List<byte[]>());
+                mobies.Add(moby);
+            }
+
+            return mobies;
+        }
+
+        public void Dispose()
+        {
+            fileStream?.Close();
+        }
+    }
+}

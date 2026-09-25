@@ -168,3 +168,14 @@ The patches were developed and tested with the USA `PCSA00133` release. Other
 regions or executable revisions are not currently supported. The repository
 and releases do not include decrypted executables, PSARC contents, or movie
 assets.
+
+## RC3 multiplayer restoration research
+
+The in-progress effort to restore the PS3 local multiplayer path in the Vita
+port is preserved under
+[`rc3-multiplayer-restoration/`](rc3-multiplayer-restoration/README.md).
+That snapshot includes the experimental taiHEN plugin, conversion and static
+analysis tools, historical notes, and the locally modified Replanetizer source
+used during the research. It does not include game executables, archives,
+converted levels, extracted assets, memory dumps, or other copyrighted game
+data.

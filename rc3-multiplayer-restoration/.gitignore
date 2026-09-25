@@ -1,0 +1,20 @@
+# Locally supplied game inputs and generated analysis data.
+legal-inputs/
+work/
+converted/
+*.elf
+*.self
+*.velf
+*.suprx
+*.psarc
+*.psp2dmp
+*.pkl
+*.bin
+*.log
+*.json
+__pycache__/
+.venv/
+
+# Replanetizer build products.
+**/bin/
+**/obj/

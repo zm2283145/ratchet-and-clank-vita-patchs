@@ -1,0 +1,843 @@
+// Copyright (C) 2018-2023, The Replanetizer Contributors.
+// Replanetizer is free software: you can redistribute it
+// and/or modify it under the terms of the GNU General Public
+// License as published by the Free Software Foundation,
+// either version 3 of the License, or (at your option) any later version.
+// Please see the LICENSE.md file for more details.
+
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Collections.Specialized;
+using System.ComponentModel;
+using System.Numerics;
+using System.Reflection;
+using System.Text;
+using ImGuiNET;
+using LibReplanetizer.LevelObjects;
+using LibReplanetizer.Models;
+using LibReplanetizer;
+using Replanetizer.Utils;
+using SixLabors.ImageSharp.PixelFormats;
+using SixLabors.ImageSharp;
+
+namespace Replanetizer.Frames
+{
+    public class PropertyFrame : Frame
+    {
+        protected sealed override string frameName { get; set; } = "Properties";
+
+        private Selection? _selection;
+
+        public Selection? selection
+        {
+            get => _selection;
+            set
+            {
+                if (_selection != null)
+                    _selection.CollectionChanged -= SelectionOnCollectionChanged;
+                if (value != null)
+                    value.CollectionChanged += SelectionOnCollectionChanged;
+                _selection = value;
+                UpdateFromSelection();
+            }
+        }
+
+        private object? _selectedObject;
+
+        public object? selectedObject
+        {
+            get => _selectedObject;
+            set
+            {
+                if (!listenToCallbacks)
+                    return;
+                _selectedObject = value;
+                RecomputeProperties();
+            }
+        }
+
+        private bool listenToCallbacks;
+        private bool hideCallbackButton;
+        private LevelFrame? levelFrame;
+        private PvarInspectorFrame pvarInspectorFrame;
+
+        private Dictionary<string, Dictionary<string, PropertyInfo>> properties = new();
+
+        public PropertyFrame(
+            Window wnd, LevelFrame? levelFrame = null, string? overrideFrameName = null,
+            bool listenToCallbacks = false, bool hideCallbackButton = false) : base(wnd)
+        {
+            if (overrideFrameName is { Length: > 0 })
+                frameName = overrideFrameName;
+
+            this.levelFrame = levelFrame;
+            this.listenToCallbacks = listenToCallbacks;
+            this.hideCallbackButton = hideCallbackButton;
+            this.pvarInspectorFrame = new PvarInspectorFrame(wnd);
+        }
+
+        private void UpdateLevelFrame()
+        {
+            levelFrame?.InvalidateView();
+        }
+
+        private void SelectionOnCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+        {
+            UpdateFromSelection();
+        }
+
+        private void UpdateFromSelection()
+        {
+            if (selection == null)
+                // This shouldn't happen
+                return;
+            selection.TryGetOne(out var obj);
+            selectedObject = obj;
+        }
+
+        private void RecomputeProperties()
+        {
+            if (selectedObject == null)
+            {
+                properties.Clear();
+                return;
+            }
+
+            properties = GetProperties(selectedObject);
+        }
+
+        private static Dictionary<string, Dictionary<string, PropertyInfo>> GetProperties(object target)
+        {
+            Dictionary<string, Dictionary<string, PropertyInfo>> result = new();
+
+            PropertyInfo[] objProps = target.GetType().GetProperties();
+            foreach (var prop in objProps)
+            {
+                if (prop.GetIndexParameters().Length != 0)
+                    continue;
+
+                string category =
+                    prop.GetCustomAttribute<CategoryAttribute>()?.Category ?? "Unknowns";
+
+                if (!result.ContainsKey(category))
+                    result[category] = new Dictionary<string, PropertyInfo>();
+
+                // Keep the reflected property name as the identity. Display names are
+                // user-facing and are not guaranteed to be unique.
+                result[category][prop.Name] = prop;
+            }
+
+            return result;
+        }
+
+        public override void RenderAsWindow(float deltaTime)
+        {
+            ImGui.SetNextWindowSize(new System.Numerics.Vector2(550, 0));
+            if (ImGui.Begin(frameName, ref isOpen))
+            {
+                Render(deltaTime);
+                ImGui.End();
+            }
+        }
+
+        public override void Render(float deltaTime)
+        {
+            if (selectedObject == null)
+            {
+                if (selection is { Count: > 1 })
+                    ImGui.Text("Multiple objects selected");
+                else
+                    ImGui.Text("Select an object");
+                return;
+            }
+
+            if (!hideCallbackButton && listenToCallbacks)
+            {
+                if (ImGui.Button("Stop following object selection"))
+                {
+                    listenToCallbacks = false;
+                }
+                ImGui.Separator();
+            }
+
+            ImGui.Text(selectedObject.GetType().Name);
+            ImGui.Separator();
+
+            ImGui.PushID(selectedObject.GetType().Name);
+
+            object target = selectedObject;
+            HashSet<object> activeObjects = new(ReferenceEqualityComparer.Instance)
+            {
+                target
+            };
+
+            foreach (var (categoryName, categoryItems) in properties)
+            {
+                ImGui.PushID(categoryName);
+                RenderCategory(categoryName, categoryItems, target, activeObjects);
+                ImGui.PopID();
+            }
+
+            ImGui.PopID();
+        }
+
+        private void RenderCategory(
+            string categoryName,
+            Dictionary<string, PropertyInfo> categoryItems,
+            object target,
+            HashSet<object> activeObjects)
+        {
+            if (ImGui.CollapsingHeader(categoryName, ImGuiTreeNodeFlags.DefaultOpen))
+            {
+                foreach (var (key, value) in categoryItems)
+                    RenderCategoryItem(target, key, value, activeObjects);
+
+                ImGui.Separator();
+            }
+        }
+
+        private static bool IsSimpleListType(Type type)
+        {
+            Type underlyingType = Nullable.GetUnderlyingType(type) ?? type;
+            return underlyingType.IsPrimitive || underlyingType.IsEnum ||
+                   underlyingType == typeof(string) || underlyingType == typeof(decimal) ||
+                   underlyingType.IsArray;
+        }
+
+        private void RenderObjectProperties(string objectName, object target, HashSet<object> activeObjects)
+        {
+            bool referenceType = !target.GetType().IsValueType;
+            if (referenceType && !activeObjects.Add(target))
+            {
+                ImGui.Text(objectName + ": [Circular Reference]");
+                return;
+            }
+
+            try
+            {
+                ImGui.Text(target.GetType().Name);
+                ImGui.Separator();
+
+                foreach (var (categoryName, categoryItems) in GetProperties(target))
+                {
+                    ImGui.PushID(categoryName);
+                    RenderCategory(categoryName, categoryItems, target, activeObjects);
+                    ImGui.PopID();
+                }
+            }
+            finally
+            {
+                if (referenceType)
+                    activeObjects.Remove(target);
+            }
+        }
+
+        private void RenderObjectList(string propertyName, IList list, Type itemType, HashSet<object> activeObjects)
+        {
+            if (!ImGui.CollapsingHeader(propertyName))
+                return;
+
+            for (int index = 0; index < list.Count; index++)
+            {
+                ImGui.PushID(index);
+
+                string itemName = itemType.Name + " [" + index + "]";
+                object? item = list[index];
+                if (item == null)
+                {
+                    ImGui.Text(itemName + ": null");
+                }
+                else if (ImGui.CollapsingHeader(itemName, ImGuiTreeNodeFlags.DefaultOpen))
+                {
+                    object itemTarget = item;
+                    RenderObjectProperties(itemName, itemTarget, activeObjects);
+
+                    if (itemType.IsValueType)
+                        list[index] = itemTarget;
+                }
+
+                ImGui.PopID();
+            }
+
+            ImGui.Separator();
+        }
+
+        private void RenderCategoryItem(
+            object target,
+            string propertyIdentifier,
+            PropertyInfo propertyInfo,
+            HashSet<object> activeObjects)
+        {
+            // Every property gets its own scope. This is important for nested
+            // PropertyFrames and for properties with identical display names.
+            ImGui.PushID(propertyIdentifier);
+
+            string propertyName =
+                propertyInfo.GetCustomAttribute<DisplayNameAttribute>()?.DisplayName ?? propertyInfo.Name;
+            object? val = propertyInfo.GetValue(target);
+            Type? type = propertyInfo.GetSetMethod() == null ? null : propertyInfo.PropertyType;
+            string? description = propertyInfo.GetCustomAttribute<DescriptionAttribute>()?.Description ?? null;
+
+            bool nestedProperty = false;
+
+            if (val == null)
+            {
+                ImGui.LabelText(propertyName, "null");
+            }
+            else if (type == typeof(string))
+            {
+                byte[] v = Encoding.ASCII.GetBytes(val as string ?? string.Empty);
+                if (ImGui.InputText(propertyName, v, (uint) v.Length))
+                {
+                    propertyInfo.SetValue(target, Encoding.ASCII.GetString(v));
+                    UpdateLevelFrame();
+                }
+            }
+            else if (type == typeof(int))
+            {
+                int v = (int) val;
+                if (ImGui.InputInt(propertyName, ref v))
+                {
+                    propertyInfo.SetValue(target, v);
+                    if (target is ModelObject modelObject && levelFrame != null)
+                    {
+                        modelObject.TryChangeModel(levelFrame.level);
+                    }
+                    UpdateLevelFrame();
+                }
+            }
+            else if (type == typeof(uint))
+            {
+                int v = unchecked((int) (uint) val);
+                if (ImGui.InputInt(propertyName, ref v))
+                {
+                    propertyInfo.SetValue(target, unchecked((uint) v));
+                    UpdateLevelFrame();
+                }
+            }
+            else if (type == typeof(short))
+            {
+                int v = Convert.ToInt16(val);
+                if (ImGui.InputInt(propertyName, ref v))
+                {
+                    propertyInfo.SetValue(target, (short) (v & 0xffff));
+                    UpdateLevelFrame();
+                }
+            }
+            else if (type == typeof(ushort))
+            {
+                int v = (ushort) val;
+                if (ImGui.InputInt(propertyName, ref v))
+                {
+                    propertyInfo.SetValue(target, unchecked((ushort) (v & 0xffff)));
+                    UpdateLevelFrame();
+                }
+            }
+            else if (type == typeof(char))
+            {
+                int v = Convert.ToChar(val);
+                if (ImGui.InputInt(propertyName, ref v))
+                {
+                    propertyInfo.SetValue(target, (char) (v & 0xff));
+                    UpdateLevelFrame();
+                }
+            }
+            else if (type == typeof(byte))
+            {
+                int v = (byte) val;
+                if (ImGui.InputInt(propertyName, ref v))
+                {
+                    propertyInfo.SetValue(target, unchecked((byte) (v & 0xff)));
+                    UpdateLevelFrame();
+                }
+            }
+            else if (type == typeof(float))
+            {
+                float v = (float) val;
+                if (ImGui.InputFloat(propertyName, ref v))
+                {
+                    propertyInfo.SetValue(target, v);
+                    UpdateLevelFrame();
+                }
+            }
+            else if (type == typeof(bool))
+            {
+                bool v = (bool) val;
+                if (ImGui.Checkbox(propertyName, ref v))
+                {
+                    propertyInfo.SetValue(target, v);
+                    UpdateLevelFrame();
+                }
+            }
+            else if (type == typeof(Bitmask))
+            {
+                int v = (int) ((Bitmask) val);
+
+                string binary = Convert.ToString(v, 2);
+                binary = binary.PadLeft(8, '0');
+
+                if (ImGui.InputText(propertyName, ref binary, (uint) binary.Length))
+                {
+                    try
+                    {
+                        propertyInfo.SetValue(target, (Bitmask) Convert.ToInt32(binary, 2));
+                    }
+                    catch
+                    {
+                        // Nothing
+                    }
+
+                    UpdateLevelFrame();
+                }
+            }
+            else if (type == typeof(Rgba32))
+            {
+                var c = (Rgba32) val;
+                var v = new Vector4(c.R / 255.0f, c.G / 255.0f, c.B / 255.0f, c.A / 255.0f);
+                if (ImGui.ColorEdit4(propertyName, ref v))
+                {
+                    Rgba32 newColor = Color.FromRgba(
+                        (byte) (v.X * 255.0f), (byte) (v.Y * 255.0f), (byte) (v.Z * 255.0f), (byte) (v.W * 255.0f)
+                    );
+                    propertyInfo.SetValue(target, newColor);
+                    UpdateLevelFrame();
+                }
+            }
+            else if (type == typeof(Rgb24))
+            {
+                var c = (Rgb24) val;
+                var v = new Vector3(c.R / 255.0f, c.G / 255.0f, c.B / 255.0f);
+                if (ImGui.ColorEdit3(propertyName, ref v))
+                {
+                    Rgb24 newColor = Color.FromRgb(
+                        (byte) (v.X * 255.0f), (byte) (v.Y * 255.0f), (byte) (v.Z * 255.0f)
+                    );
+                    propertyInfo.SetValue(target, newColor);
+                    UpdateLevelFrame();
+                }
+            }
+            else if (type == typeof(OpenTK.Mathematics.Vector3))
+            {
+                var origV = (OpenTK.Mathematics.Vector3) val;
+                var v = new Vector3(origV.X, origV.Y, origV.Z);
+                if (ImGui.InputFloat3(propertyName, ref v))
+                {
+                    origV.X = v.X;
+                    origV.Y = v.Y;
+                    origV.Z = v.Z;
+                    propertyInfo.SetValue(target, origV);
+
+                    if (target is LevelObject levelObject)
+                        levelObject.UpdateTransformMatrix();
+
+                    UpdateLevelFrame();
+                }
+            }
+            else if (type == typeof(OpenTK.Mathematics.Vector4))
+            {
+                var origV = (OpenTK.Mathematics.Vector4) val;
+                var v = new Vector4(origV.X, origV.Y, origV.Z, origV.Z);
+                if (ImGui.InputFloat4(propertyName, ref v))
+                {
+                    origV.X = v.X;
+                    origV.Y = v.Y;
+                    origV.Z = v.Z;
+                    origV.W = v.W;
+                    propertyInfo.SetValue(target, origV);
+
+                    if (target is LevelObject levelObject)
+                        levelObject.UpdateTransformMatrix();
+
+                    UpdateLevelFrame();
+                }
+            }
+            else if (type == typeof(OpenTK.Mathematics.Quaternion))
+            {
+                var origRot = ((OpenTK.Mathematics.Quaternion) val).ToEulerAngles();
+                var v = new Vector3(origRot.X, origRot.Y, origRot.Z);
+                if (ImGui.InputFloat3(propertyName, ref v))
+                {
+                    origRot.X = v.X;
+                    origRot.Y = v.Y;
+                    origRot.Z = v.Z;
+                    propertyInfo.SetValue(
+                        target,
+                        new OpenTK.Mathematics.Quaternion(origRot.X, origRot.Y, origRot.Z)
+                    );
+
+                    if (target is LevelObject levelObject)
+                        levelObject.UpdateTransformMatrix();
+
+                    UpdateLevelFrame();
+                }
+            }
+            else if (type == typeof(OpenTK.Mathematics.Matrix4))
+            {
+                var mat = (OpenTK.Mathematics.Matrix4) val;
+                var v1 = new Vector4(mat.M11, mat.M12, mat.M13, mat.M14);
+                var v2 = new Vector4(mat.M21, mat.M22, mat.M23, mat.M24);
+                var v3 = new Vector4(mat.M31, mat.M32, mat.M33, mat.M34);
+                var v4 = new Vector4(mat.M41, mat.M42, mat.M43, mat.M44);
+
+                bool change = false;
+
+                if (ImGui.InputFloat4($"{propertyName} Row 1", ref v1))
+                {
+                    change = true;
+                    mat.M11 = v1.X;
+                    mat.M12 = v1.Y;
+                    mat.M13 = v1.Z;
+                    mat.M14 = v1.W;
+                }
+
+                if (ImGui.InputFloat4($"{propertyName} Row 2", ref v2))
+                {
+                    change = true;
+                    mat.M21 = v2.X;
+                    mat.M22 = v2.Y;
+                    mat.M23 = v2.Z;
+                    mat.M24 = v2.W;
+                }
+
+                if (ImGui.InputFloat4($"{propertyName} Row 3", ref v3))
+                {
+                    change = true;
+                    mat.M31 = v3.X;
+                    mat.M32 = v3.Y;
+                    mat.M33 = v3.Z;
+                    mat.M34 = v3.W;
+                }
+
+                if (ImGui.InputFloat4($"{propertyName} Row 4", ref v4))
+                {
+                    change = true;
+                    mat.M41 = v4.X;
+                    mat.M42 = v4.Y;
+                    mat.M43 = v4.Z;
+                    mat.M44 = v4.W;
+                }
+
+                if (change)
+                {
+                    propertyInfo.SetValue(target, mat);
+
+                    if (target is LevelObject levelObject)
+                        levelObject.UpdateTransformMatrix();
+
+                    UpdateLevelFrame();
+                }
+            }
+            else if (type == typeof(OpenTK.Mathematics.Matrix3x4))
+            {
+                var mat = (OpenTK.Mathematics.Matrix3x4) val;
+                var v1 = new Vector4(mat.M11, mat.M12, mat.M13, mat.M14);
+                var v2 = new Vector4(mat.M21, mat.M22, mat.M23, mat.M24);
+                var v3 = new Vector4(mat.M31, mat.M32, mat.M33, mat.M34);
+
+                bool change = false;
+
+                if (ImGui.InputFloat4($"{propertyName} Row 1", ref v1))
+                {
+                    change = true;
+                    mat.M11 = v1.X;
+                    mat.M12 = v1.Y;
+                    mat.M13 = v1.Z;
+                    mat.M14 = v1.W;
+                }
+
+                if (ImGui.InputFloat4($"{propertyName} Row 2", ref v2))
+                {
+                    change = true;
+                    mat.M21 = v2.X;
+                    mat.M22 = v2.Y;
+                    mat.M23 = v2.Z;
+                    mat.M24 = v2.W;
+                }
+
+                if (ImGui.InputFloat4($"{propertyName} Row 3", ref v3))
+                {
+                    change = true;
+                    mat.M31 = v3.X;
+                    mat.M32 = v3.Y;
+                    mat.M33 = v3.Z;
+                    mat.M34 = v3.W;
+                }
+
+                if (change)
+                {
+                    propertyInfo.SetValue(target, mat);
+
+                    if (target is LevelObject levelObject)
+                        levelObject.UpdateTransformMatrix();
+
+                    UpdateLevelFrame();
+                }
+            }
+            else if (type is { IsArray: true })
+            {
+                if (ImGui.CollapsingHeader(propertyName))
+                {
+                    Array array = (Array) val;
+
+                    if (target is Moby pvarMoby && propertyInfo.Name == nameof(Moby.pVars))
+                    {
+                        pvarInspectorFrame.moby = pvarMoby;
+                        pvarInspectorFrame.levelFrame = levelFrame;
+
+                        ImGui.PushID("PvarInspector");
+                        pvarInspectorFrame.Render(0);
+                        ImGui.PopID();
+                    }
+
+                    if (array.Length == 0)
+                    {
+                        ImGui.Text("[Empty Array]");
+                        ImGui.Separator();
+                    }
+                    else
+                    {
+                        /* Peek at first element's type to customize rendering */
+                        Type t = array.GetValue(0)!.GetType();
+
+                        if (t == typeof(byte) || t == typeof(char))
+                        {
+                            /* Display byte arrays in hex editor fashion:
+                             *       00 01 02 03  04 05 06 07  08 09 0A 0B  0C 0D 0E 0F
+                             * 0000: xx xx xx xx  xx xx xx xx  xx xx xx xx  xx xx xx xx
+                             */
+                            ImGui.Text($"{propertyName}: Array<{t.Name}>[0x{array.Length.ToString("X2")}]");
+                            if (ImGui.BeginTable($"{propertyName} ByteArray",
+                                    17, /* 16 bytes + 1 for offset column */
+                                    ImGuiTableFlags.BordersH | ImGuiTableFlags.BordersOuterV |
+                                    ImGuiTableFlags.NoHostExtendX))
+                            {
+                                float byteColumnWidth = ImGui.CalcTextSize("FF").X;
+                                float offsetColumnWidth = ImGui.CalcTextSize("0000").X * 1.5f;
+
+                                ImGui.TableSetupColumn("Offset", ImGuiTableColumnFlags.WidthFixed, offsetColumnWidth);
+                                for (int i = 0; i < 16; i++)
+                                {
+                                    ImGui.TableSetupColumn(i.ToString("X2"), ImGuiTableColumnFlags.WidthFixed, byteColumnWidth);
+                                }
+                                ImGui.TableHeadersRow();
+
+                                int numRows = (array.Length + 15) / 16;
+                                for (int row = 0; row < numRows; row++)
+                                {
+                                    ImGui.TableNextRow();
+                                    ImGui.TableSetColumnIndex(0);
+
+                                    int offset = row * 16;
+
+                                    /* Center content of all columns */
+                                    ImGui.SetCursorPosX(ImGui.GetCursorPosX() +
+                                        (ImGui.GetColumnWidth() - offsetColumnWidth) * 0.5f);
+                                    ImGui.TextDisabled(offset.ToString("X4"));
+
+                                    for (int col = 0, index = offset;
+                                        col < 16 && index < array.Length;
+                                        col++, index++)
+                                    {
+                                        ImGui.TableSetColumnIndex(col + 1);
+                                        byte element = Convert.ToByte(array.GetValue(index)!);
+                                        string byteText = element.ToString("X2");
+                                        string tooltipText = $"Decimal (8 bits): {element}" +
+                                                           $"\nHexadecimal (8 bits): {byteText}";
+
+                                        /* When hovering the first byte of a u16,
+                                         * display additional info in the tooltip
+                                         */
+                                        if ((col % 2) == 0 && ((index + 1) < array.Length))
+                                        {
+                                            ushort u16val = (ushort) ((element << 8) | Convert.ToByte(array.GetValue(index + 1)!));
+                                            tooltipText += $"\nDecimal (16 bits): {u16val}";
+                                            tooltipText += $"\nHexadecimal (16 bits): 0x" + u16val.ToString("X4");
+                                        }
+
+                                        /* Ditto for the first byte of a u32 */
+                                        if ((col % 4) == 0 && ((index + 3) < array.Length))
+                                        {
+                                            byte n1 = Convert.ToByte(array.GetValue(index + 1)!);
+                                            byte n2 = Convert.ToByte(array.GetValue(index + 2)!);
+                                            byte n3 = Convert.ToByte(array.GetValue(index + 3)!);
+
+                                            uint u32val = (uint) ((element << 24) | (n1 << 16) | (n2 << 8) | n3);
+                                            tooltipText += $"\nDecimal (32 bits): {u32val}";
+                                            tooltipText += $"\nHexadecimal (32 bits): 0x" + u32val.ToString("X8");
+
+                                            /* Also try to decode as floating-point number */
+                                            float f32val = BitConverter.UInt32BitsToSingle(u32val);
+                                            tooltipText += $"\nFloat: {f32val}";
+                                        }
+
+                                        ImGui.Text(byteText);
+                                        if (ImGui.BeginItemTooltip())
+                                        {
+                                            ImGui.TextUnformatted(tooltipText);
+                                            ImGui.EndTooltip();
+                                        }
+                                    }
+                                }
+
+                                ImGui.EndTable();
+                            }
+                        }
+                        else
+                        {
+                            /* Type without specific handling: fallback to simple listing */
+                            foreach (object o in array)
+                                ImGui.Text(Convert.ToString(o));
+                        }
+                    }
+                    ImGui.Separator();
+                }
+            }
+            else if (type is { IsEnum: true })
+            {
+                Array values = Enum.GetValues(type);
+                string[] strings = new string[values.Length];
+                for (int i = 0; i < values.Length; i++)
+                    strings[i] = Convert.ToString(values.GetValue(i)) ?? string.Empty;
+
+                int index = Convert.ToInt32(val);
+                if (index < values.Length)
+                {
+                    if (ImGui.Combo(propertyName, ref index, strings, values.Length))
+                    {
+                        propertyInfo.SetValue(target, index);
+                        UpdateLevelFrame();
+                    }
+                }
+                else
+                    ImGui.LabelText(propertyName, "[Out of Range] " + Convert.ToString(index));
+            }
+            else if (type is { IsGenericType: true } && type.GetGenericTypeDefinition() == typeof(List<>))
+            {
+                ICollection list = (ICollection) val;
+                Type genericType = type.GetGenericArguments()[0];
+                if (genericType == typeof(TextureConfig))
+                {
+                    if (ImGui.CollapsingHeader(propertyName))
+                    {
+                        int i = 1;
+
+                        foreach (TextureConfig t in list)
+                        {
+                            ImGui.PushID("TextureConfig" + i);
+
+                            ImGui.Text("Texture Config " + i);
+
+                            int id = t.id;
+                            if (ImGui.InputInt("Texture ID", ref id))
+                            {
+                                t.id = id;
+                            }
+
+                            ImGui.LabelText("Face Start", t.start.ToString());
+                            ImGui.LabelText("Face Count", t.size.ToString());
+                            ImGui.LabelText("Mode", t.mode.ToString());
+
+                            int wrapModeS = (int) t.wrapModeS;
+                            if (ImGui.Combo("Texture Wrap S" + " ###" + i, ref wrapModeS, TextureConfig.WRAP_MODE_STRINGS, TextureConfig.WRAP_MODE_STRINGS.Length))
+                            {
+                                t.wrapModeS = (TextureConfig.WrapMode) wrapModeS;
+                            }
+
+                            int wrapModeT = (int) t.wrapModeT;
+                            if (ImGui.Combo("Texture Wrap T", ref wrapModeT, TextureConfig.WRAP_MODE_STRINGS, TextureConfig.WRAP_MODE_STRINGS.Length))
+                            {
+                                t.wrapModeT = (TextureConfig.WrapMode) wrapModeT;
+                            }
+
+                            ImGui.PopID();
+
+                            i++;
+                        }
+
+                        ImGui.Separator();
+                    }
+                }
+                else if (genericType == typeof(Attachment))
+                {
+                    if (ImGui.CollapsingHeader(propertyName))
+                    {
+                        int i = 1;
+
+                        foreach (Attachment a in list)
+                        {
+                            ImGui.PushID("Attachment" + i);
+
+                            ImGui.Text("Attachment " + i);
+
+                            if (ImGui.CollapsingHeader("Bones A"))
+                            {
+                                foreach (byte b in a.aBones)
+                                {
+                                    ImGui.Text(b.ToString());
+                                }
+                            }
+
+                            if (ImGui.CollapsingHeader("Bones B"))
+                            {
+                                foreach (byte b in a.bBones)
+                                {
+                                    ImGui.Text(b.ToString());
+                                }
+                            }
+
+                            ImGui.PopID();
+
+                            i++;
+                        }
+
+                        ImGui.Separator();
+                    }
+                }
+                else
+                {
+                    if (IsSimpleListType(genericType))
+                    {
+                        string genericTypeName = genericType.Name;
+                        ImGui.LabelText(propertyName, "List<" + genericTypeName + ">[" + list.Count + "]");
+                    }
+                    else
+                    {
+                        RenderObjectList(propertyName, (IList) list, genericType, activeObjects);
+                    }
+                }
+            }
+            else if (val != null)
+            {
+                if (ImGui.CollapsingHeader(propertyName))
+                {
+                    nestedProperty = true;
+                    RenderObjectProperties(propertyName, val, activeObjects);
+                }
+            }
+            else
+            {
+                ImGui.LabelText(propertyName, Convert.ToString(val));
+            }
+
+            if (description != null && !nestedProperty)
+            {
+                ImGui.SameLine();
+
+                ImGui.TextDisabled("(?)");
+                if (ImGui.IsItemHovered())
+                {
+                    if (ImGui.BeginTooltip())
+                    {
+                        ImGui.PushTextWrapPos(ImGui.GetFontSize() * 40.0f);
+                        ImGui.TextUnformatted(description);
+                        ImGui.PopTextWrapPos();
+                    }
+                    ImGui.EndTooltip();
+                }
+            }
+
+            ImGui.PopID();
+        }
+    }
+}

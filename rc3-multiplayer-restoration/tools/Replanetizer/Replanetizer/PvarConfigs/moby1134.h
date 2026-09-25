@@ -1,0 +1,39 @@
+// Gold/platinum/titanium bolt
+
+struct update1134 { // 0x80
+	/* 0x00 */ int boltSlot;
+	/* 0x04 */ cuboid camCuboidStart;
+	/* 0x08 */ cuboid camCuboidEnd;
+	/* 0x0c */ char unk0c;
+	/* 0x0d */ char skipAnimation;
+	/* 0x0e */ char unk0e;
+	/* 0x0f */ char unk0f;
+	/* 0x10 */ int unk10;
+	/* 0x14 */ int unk14;
+	/* 0x18 */ int unk18;
+	/* 0x1c */ int unk1c;
+	/* 0x20 */ int unk20;
+	/* 0x24 */ int unk24;
+	/* 0x28 */ int unk28;
+	/* 0x2c */ int unk2c;
+	/* 0x30 */ int unk30;
+	/* 0x34 */ int unk34;
+	/* 0x38 */ int unk38;
+	/* 0x3c */ int unk3c;
+	/* 0x40 */ int unk40;
+	/* 0x44 */ int unk44;
+	/* 0x48 */ int unk48;
+	/* 0x4c */ int unk4c;
+	/* 0x50 */ int unk50;
+	/* 0x54 */ int unk54;
+	/* 0x58 */ int unk58;
+	/* 0x5c */ int unk5c;
+	/* 0x60 */ int unk60;
+	/* 0x64 */ int unk64;
+	/* 0x68 */ int unk68;
+	/* 0x6c */ int unk6c;
+	/* 0x70 */ int unk70;
+	/* 0x74 */ int unk74;
+	/* 0x78 */ int unk78;
+	/* 0x7c */ int unk7c;
+};

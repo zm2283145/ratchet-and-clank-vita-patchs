@@ -1,0 +1,86 @@
+// Copyright (C) 2018-2021, The Replanetizer Contributors.
+// Replanetizer is free software: you can redistribute it
+// and/or modify it under the terms of the GNU General Public
+// License as published by the Free Software Foundation,
+// either version 3 of the License, or (at your option) any later version.
+// Please see the LICENSE.md file for more details.
+
+using LibReplanetizer.LevelObjects;
+using LibReplanetizer;
+using System.Collections.Generic;
+using Replanetizer.Frames;
+using Replanetizer.Renderer;
+
+namespace Replanetizer.Utils
+{
+    /// <summary>
+    /// A class which handles the clipboard feature.
+    /// Currently there are only shrubs supported.
+    /// TODO:
+    ///     - Mobies (Implemented but copies crash the game)
+    ///     - Ties (Implemented but issues with occlusion system)
+    /// </summary>
+    public class Clipboard
+    {
+        private List<LevelObject>? content = null;
+
+        /// <summary>
+        /// Takes a selection and copies all supported level object into the clipboard.
+        /// </summary>
+        public void Copy(Selection? selection)
+        {
+            if (selection == null) return;
+
+            content = new List<LevelObject>();
+
+            List<LevelObject> originalObjects = selection.ToList();
+
+            foreach (LevelObject o in originalObjects)
+            {
+                // Add different types here once they are supported
+                if (o is Moby || o is Shrub || o is Tie)
+                    content.Add(o.Clone());
+            }
+        }
+
+        /// <summary>
+        /// Adds all elements from the clipboard to the level/levelFrame.
+        /// Automatically selects all added elements if the clipboard was not empty.
+        /// </summary>
+        public void Apply(Level level, LevelFrame levelFrame)
+        {
+            if (content == null || content.Count == 0) return;
+
+            levelFrame.selectedObjects.Clear();
+
+            foreach (LevelObject o in content)
+            {
+                LevelObject o2 = o.Clone();
+
+                if (o2 is Moby mob)
+                {
+                    if (mob.pvarIndex != -1)
+                    {
+                        mob.pvarIndex = level.pVars.Count;
+                        level.pVars.Add(mob.pVars);
+                    }
+
+                    level.mobs.Add(mob);
+                    levelFrame.selectedObjects.Add(mob);
+                }
+                else if (o2 is Shrub shrub)
+                {
+                    level.shrubs.Add(shrub);
+                    levelFrame.selectedObjects.Add(shrub);
+                }
+                else if (o2 is Tie tie)
+                {
+                    level.ties.Add(tie);
+                    levelFrame.selectedObjects.Add(tie);
+                }
+
+                levelFrame.levelRenderer?.Include(o2);
+            }
+        }
+    }
+}

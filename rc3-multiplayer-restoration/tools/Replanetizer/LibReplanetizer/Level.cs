@@ -1,0 +1,670 @@
+﻿// Copyright (C) 2018-2021, The Replanetizer Contributors.
+// Replanetizer is free software: you can redistribute it
+// and/or modify it under the terms of the GNU General Public
+// License as published by the Free Software Foundation,
+// either version 3 of the License, or (at your option) any later version.
+// Please see the LICENSE.md file for more details.
+
+using LibReplanetizer.Headers;
+using LibReplanetizer.LevelObjects;
+using LibReplanetizer.Models;
+using LibReplanetizer.Models.Animations;
+using LibReplanetizer.Parsers;
+using System;
+using System.Collections.Generic;
+using System.IO;
+using LibReplanetizer.Serializers;
+using System.Linq;
+
+namespace LibReplanetizer
+{
+    public class Level : IDisposable
+    {
+        private static readonly NLog.Logger LOGGER = NLog.LogManager.GetCurrentClassLogger();
+
+        public bool valid;
+        public bool emplacedState = false;
+
+        public string? path;
+
+        public GameType game;
+
+        //Models
+        public List<Model> mobyModels;
+        public List<Model> tieModels;
+        public List<Model> shrubModels;
+        public List<Model> gadgetModels;
+        public List<Model> armorModels;
+        public List<MobyModel> spaceshipModels;
+
+        public int spaceshipTextureBaseIndex = -1;
+        public List<Model> spaceshipAttachmentModels = new List<Model>();
+        public MobyModel? spaceShipRc23Model;
+        public int spaceshipBodyVariant = -1;
+
+        public Collision collisionEngine;
+        public List<Collision> collisionChunks;
+        public List<Texture> textures;
+        public List<Texture> spaceshipTextures;
+        public List<List<Texture>> armorTextures;
+        public List<Texture> gadgetTextures;
+        public SkyboxModel skybox;
+
+        public MobyOcclusion? mobyOcclusion;
+
+        public byte[] billboardBytes;
+        public byte[] soundConfigBytes;
+
+        public List<Animation> playerAnimations;
+        public List<UiElement> uiElements;
+
+
+        //Level objects
+        public List<Moby> mobs;
+        public List<Tie> ties;
+        public List<Shrub> shrubs;
+        public List<Light> lights;
+        public List<Spline> splines;
+        public Terrain terrainEngine;
+        public List<Terrain> terrainChunks;
+        public List<int> textureConfigMenus;
+        public List<Mission> missions;
+        public List<List<MobyModel>> mobyloadModels;
+        public List<List<Texture>> mobyloadTextures;
+
+        public LevelVariables levelVariables;
+        public OcclusionData? occlusionData;
+
+        public List<LanguageData> english;
+        public List<LanguageData> ukenglish;
+        public List<LanguageData> french;
+        public List<LanguageData> german;
+        public List<LanguageData> spanish;
+        public List<LanguageData> italian;
+        public List<LanguageData> japanese;
+        public List<LanguageData> korean;
+
+        public byte[] unk1;
+        public byte[] unk2;
+        public byte[] unk4;
+        public byte[] unk5;
+        public byte[] unk6;
+        public byte[] unk7;
+        public byte[] unk8;
+        public byte[] unk9;
+        public byte[] unk14;
+        public byte[] unk17;
+
+        public LightConfig lightConfig;
+        public PrecipitationMap? precipitationMap;
+
+        public List<PvarScratchPad> pvarScratchPads;
+        public List<PvarRewire> pvarRewires;
+
+        public byte[] tieData;
+        public byte[] shrubData;
+
+        public byte[] tieGroupData;
+        public byte[] shrubGroupData;
+
+        public byte[] areasData;
+
+        public List<DirectionalLight> directionalLights;
+        public List<PointLight> pointLights;
+        public List<EnvSample> envSamples;
+        public List<EnvTransition> envTransitions;
+        public List<SoundInstance> soundInstances;
+        public List<GrindPath> grindPaths;
+        public List<GlobalPvarBlock> pvarBlocks;
+
+        public List<byte[]> pVars;
+        public List<Cuboid> cuboids;
+        public List<Sphere> spheres;
+        public List<Cylinder> cylinders;
+        public List<Pill> pills;
+        public List<GameCamera> gameCameras;
+
+        public List<int> mobyIds;
+        public List<int> tieIds;
+        public List<int> shrubIds;
+
+        public int pvarBlocksHeaderPadding = 0x10;
+
+        ~Level()
+        {
+            LOGGER.Trace("Level destroyed");
+        }
+
+        //Engine file constructor
+        public Level(string enginePath)
+        {
+
+            path = Path.GetDirectoryName(enginePath);
+
+            mobyModels = new List<Model>();
+            MobyModel? ratchet = null;
+
+            // Engine elements
+            using (EngineParser engineParser = new EngineParser(enginePath))
+            {
+                game = engineParser.GetGameType();
+
+                //REMOVE THESE ASAP!!!!!111
+                billboardBytes = engineParser.GetBillboardBytes();
+                soundConfigBytes = engineParser.GetSoundConfigBytes();
+
+                LOGGER.Debug("Parsing skybox...");
+                skybox = engineParser.GetSkyboxModel();
+                LOGGER.Debug("Success");
+
+                LOGGER.Debug("Parsing moby models...");
+                mobyModels = engineParser.GetMobyModels();
+                LOGGER.Debug("Added {0} moby models", mobyModels.Count);
+
+                LOGGER.Debug("Parsing tie models...");
+                tieModels = engineParser.GetTieModels();
+                LOGGER.Debug("Added {0} tie models", tieModels.Count);
+
+                LOGGER.Debug("Parsing shrub models...");
+                shrubModels = engineParser.GetShrubModels();
+                LOGGER.Debug("Added {0} shrub models", shrubModels.Count);
+
+                LOGGER.Debug("Parsing weapons...");
+                gadgetModels = engineParser.GetGadgets();
+                LOGGER.Debug("Added {0} weapons", gadgetModels.Count);
+
+                LOGGER.Debug("Parsing textures...");
+                textures = engineParser.GetTextures();
+                LOGGER.Debug("Added {0} textures", textures.Count);
+
+                LOGGER.Debug("Parsing ties...");
+                ties = engineParser.GetTies(tieModels);
+                LOGGER.Debug("Added {0} ties", ties.Count);
+
+                LOGGER.Debug("Parsing Shrubs...");
+                shrubs = engineParser.GetShrubs(shrubModels);
+                LOGGER.Debug("Added {0} shrubs", shrubs.Count);
+
+                LOGGER.Debug("Parsing Lights...");
+                lights = engineParser.GetLights();
+                LOGGER.Debug("Added {0} lights", lights.Count);
+
+                LOGGER.Debug("Parsing terrain elements...");
+                terrainEngine = engineParser.GetTerrainModel();
+                LOGGER.Debug("Added {0} terrain elements", terrainEngine.fragments.Count);
+
+                LOGGER.Debug("Parsing player animations...");
+                ratchet = engineParser.FindRatchetMoby(mobyModels);
+                playerAnimations = ratchet != null ? engineParser.GetPlayerAnimations(ratchet) : new List<Animation>();
+                LOGGER.Debug("Added {0} player animations", playerAnimations.Count);
+
+                uiElements = engineParser.GetUiElements();
+                LOGGER.Debug("Added {0} ui elements", uiElements.Count);
+
+                lightConfig = engineParser.GetLightConfig();
+                precipitationMap = engineParser.GetPrecipitationMap();
+                textureConfigMenus = engineParser.GetTextureConfigMenu();
+
+                mobyOcclusion = engineParser.GetMobyOcclusion();
+
+                collisionEngine = engineParser.GetCollisionModel();
+
+                unk1 = engineParser.GetUnk1Bytes();
+                unk2 = engineParser.GetUnk2Bytes();
+                unk4 = engineParser.GetUnk4Bytes();
+                unk5 = engineParser.GetUnk5Bytes();
+                unk8 = engineParser.GetUnk8Bytes();
+                unk9 = engineParser.GetUnk9Bytes();
+            }
+
+            // Gameplay elements
+            using (GameplayParser gameplayParser = new GameplayParser(game, path + @"/gameplay_ntsc"))
+            {
+                LOGGER.Debug("Parsing Level variables...");
+                levelVariables = gameplayParser.GetLevelVariables();
+
+                LOGGER.Debug("Parsing pvars...");
+                pVars = gameplayParser.GetPvars();
+
+                LOGGER.Debug("Parsing mobs...");
+                mobs = gameplayParser.GetMobies(mobyModels, pVars);
+                LOGGER.Debug("Added {0} mobs", mobs.Count);
+
+                LOGGER.Debug("Parsing splines...");
+                splines = gameplayParser.GetSplines();
+                LOGGER.Debug("Added {0} splines", splines.Count);
+
+                LOGGER.Debug("Parsing languages...");
+                english = gameplayParser.GetEnglish();
+                ukenglish = gameplayParser.GetUkEnglish();
+                french = gameplayParser.GetFrench();
+                german = gameplayParser.GetGerman();
+                spanish = gameplayParser.GetSpanish();
+                italian = gameplayParser.GetItalian();
+                japanese = gameplayParser.GetJapanese();
+                korean = gameplayParser.GetKorean();
+
+                LOGGER.Debug("Parsing other gameplay assets...");
+                unk6 = gameplayParser.GetUnk6();
+                unk7 = gameplayParser.GetUnk7();
+                unk14 = gameplayParser.GetUnk14();
+                unk17 = gameplayParser.GetUnk17();
+
+                tieData = gameplayParser.GetTieData(ties.Count);
+                shrubData = gameplayParser.GetShrubData(shrubs.Count);
+
+                tieGroupData = gameplayParser.GetTieGroups();
+                shrubGroupData = gameplayParser.GetShrubGroups();
+
+                areasData = gameplayParser.GetAreasData();
+
+                directionalLights = gameplayParser.GetDirectionalLights();
+                pointLights = gameplayParser.GetPointLights();
+                envSamples = gameplayParser.GetEnvSamples();
+                envTransitions = gameplayParser.GetEnvTransitions();
+                soundInstances = gameplayParser.GetSoundInstances();
+                grindPaths = gameplayParser.GetGrindPaths();
+
+                pvarBlocks = gameplayParser.GetPvarBlocks(ref pvarBlocksHeaderPadding);
+                pvarScratchPads = gameplayParser.GetPvarScratchPads();
+                pvarRewires = gameplayParser.GetPvarRewires();
+
+                cuboids = gameplayParser.GetCuboids();
+                spheres = gameplayParser.GetSpheres();
+                cylinders = gameplayParser.GetCylinders();
+                pills = gameplayParser.GetPills();
+
+                gameCameras = gameplayParser.GetGameCameras();
+
+                mobyIds = gameplayParser.GetMobyIds();
+                tieIds = gameplayParser.GetTieIds();
+                shrubIds = gameplayParser.GetShrubIds();
+                occlusionData = gameplayParser.GetOcclusionData();
+            }
+
+            terrainChunks = new List<Terrain>();
+            collisionChunks = new List<Collision>();
+
+            for (int i = 0; i < 5; i++)
+            {
+                string? chunkPath = Path.Join(path, @"chunk" + i + ".ps3");
+                if (!File.Exists(chunkPath)) continue;
+
+                using (ChunkParser chunkParser = new ChunkParser(chunkPath, game))
+                {
+                    terrainChunks.Add(chunkParser.GetTerrainModels());
+                    collisionChunks.Add(chunkParser.GetCollisionModel());
+                }
+            }
+
+            List<string> armorPaths = ArmorHeader.FindArmorFiles(game, enginePath);
+            armorModels = new List<Model>();
+            armorTextures = new List<List<Texture>>();
+
+            foreach (string armor in armorPaths)
+            {
+                LOGGER.Debug("Looking for armor data in {0}", armor);
+                List<Texture> tex;
+                MobyModel? model;
+                using (ArmorParser parser = new ArmorParser(game, armor))
+                {
+                    tex = parser.GetTextures();
+                    model = parser.GetArmor();
+
+                    if (model != null && ratchet != null)
+                    {
+                        /*
+                         * Armor models do not contain animations, instead they are stored in the ratchet model which itself does not contain a mesh.
+                         * For export purposes we assign these animations here.
+                         */
+                        model.animations = ratchet.animations;
+                        model.boneCount = ratchet.boneCount;
+                        model.boneDatas = ratchet.boneDatas;
+                        model.boneMatrices = ratchet.boneMatrices;
+                        model.skeleton = ratchet.skeleton;
+                    }
+                }
+
+                string vram = armor.Replace(".ps3", ".vram");
+
+                using (VramParser parser = new VramParser(vram))
+                {
+                    parser.GetTextures(tex);
+                }
+
+                if (model != null)
+                {
+                    // Set a canonical id so Replanetizer can more easily differentiate between armor models
+                    model.id = (short) armorModels.Count;
+                    armorModels.Add(model);
+                }
+
+                armorTextures.Add(tex);
+            }
+
+            string gadgetPath = GadgetHeader.FindGadgetFile(game, enginePath);
+            gadgetTextures = new List<Texture>();
+
+            if (gadgetPath != "")
+            {
+                LOGGER.Debug("Looking for gadget data in {0}", gadgetPath);
+                using (GadgetParser parser = new GadgetParser(game, gadgetPath))
+                {
+                    gadgetModels.AddRange(parser.GetModels());
+                    gadgetTextures.AddRange(parser.GetTextures());
+                }
+
+                using (VramParser parser = new VramParser(gadgetPath.Replace(".ps3", ".vram")))
+                {
+                    parser.GetTextures(gadgetTextures);
+                }
+            }
+
+            (spaceshipModels, spaceshipTextures) = SpaceshipParser.GetAllSpaceshipData(game, enginePath);
+            LOGGER.Debug("Added {0} spaceship models", spaceshipModels.Count);
+
+            List<string> missionDataPaths = MissionHeader.FindMissionDataFiles(game, enginePath);
+            missions = new List<Mission>();
+
+            foreach (string datPath in missionDataPaths)
+            {
+                int missionId = MissionHeader.GetMissionId(datPath);
+                string missionPath = Path.Join(Path.GetDirectoryName(enginePath), $"gameplay_mission_classes[{missionId}].ps3");
+                string vramPath = missionPath.Replace(".ps3", ".vram");
+
+                if (!File.Exists(vramPath))
+                {
+                    LOGGER.Warn("Could not find .vram file for {0}", missionPath);
+                    continue;
+                }
+
+                Mission mission = new Mission(missionId);
+
+                using (MissionParser parser = new MissionParser(game, missionPath))
+                {
+                    mission.models = parser.GetModels();
+                    mission.textures = parser.GetTextures();
+                }
+
+                using (VramParser parser = new VramParser(vramPath))
+                {
+                    parser.GetTextures(mission.textures);
+                }
+
+                using var datParser = new MissionDataParser(datPath, game);
+                mission.mobies = datParser.GetMobies(mission.models, mobyModels);
+
+                missions.Add(mission);
+            }
+
+            mobyloadModels = new List<List<MobyModel>>();
+            mobyloadTextures = new List<List<Texture>>();
+
+            for (int mobyloadFileID = 0; mobyloadFileID < 32; mobyloadFileID++)
+            {
+                string? mobyloadFilePath = MobyloadHeader.FindMobyloadFile(game, enginePath, mobyloadFileID);
+                if (mobyloadFilePath != null)
+                {
+                    using (MobyloadParser parser = new MobyloadParser(game, mobyloadFilePath))
+                    {
+                        mobyloadModels.Add(parser.GetMobyModels());
+                        mobyloadTextures.Add(parser.GetTextures());
+                    }
+                }
+            }
+
+            using (VramParser vramParser = new VramParser(path + @"/vram.ps3"))
+            {
+                vramParser.GetTextures(textures);
+            }
+
+            LOGGER.Info("Level parsing done");
+            valid = true;
+        }
+
+        // Copies data like gadget models from gadget files etc into engine data.
+        public void EmplaceCommonData()
+        {
+            Utilities.DebugAssert(emplacedState == false, "Level already emplaced its common data.");
+
+            int gadgetTextureOffset = textures.Count;
+
+            textures.AddRange(gadgetTextures);
+
+            foreach (Model model in gadgetModels)
+            {
+                if (game != GameType.RaC1)
+                {
+                    foreach (TextureConfig conf in model.textureConfig)
+                    {
+                        conf.id += gadgetTextureOffset;
+                    }
+                }
+
+                mobyModels.RemoveAll(x => x.id == model.id);
+            }
+
+            mobyModels.AddRange(gadgetModels);
+
+            if (armorModels.Count > 0)
+            {
+                // Replace the empty ratchet model with the first armor model.
+                // This can be changed once we know where the game stores which armor model to use.
+                MobyModel defaultRatchetModel = (MobyModel) armorModels[0];
+
+                foreach (TextureConfig conf in defaultRatchetModel.textureConfig)
+                {
+                    conf.id += textures.Count;
+                }
+
+                textures.AddRange(armorTextures[0]);
+
+                MobyModel? ratchetModel = (MobyModel?) mobyModels.Find(x => x.id == 0);
+
+                if (ratchetModel != null)
+                {
+                    ratchetModel.ReplaceMeshData(defaultRatchetModel);
+                }
+                else
+                {
+                    // Fallback for when the level has no mobymodel
+                    ratchetModel = defaultRatchetModel;
+                }
+
+            }
+
+            mobyModels.ForEach(x =>
+            {
+                if (x.id == 0 && x is MobyModel mobyModel)
+                {
+                    mobyModel.animations = playerAnimations;
+                }
+            });
+
+            // Spaceship model handling
+            // The texture IDs are local to their original file, so we need to transform them
+            // to the level's texture ID space.
+
+            spaceshipTextureBaseIndex = textures.Count;
+
+            if (game == GameType.RaC1)
+            {
+                foreach (MobyModel model in spaceshipModels)
+                {
+                    mobyModels.RemoveAll(x => x.id == model.id);
+                }
+
+                foreach (MobyModel model in spaceshipModels)
+                {
+                    foreach (TextureConfig conf in model.textureConfig)
+                    {
+                        int variant = conf.id;
+                        if (variant < 0 || variant >= spaceshipTextures.Count)
+                            variant = 0;
+
+                        conf.id = spaceshipTextureBaseIndex + variant;
+                    }
+                }
+
+                mobyModels.AddRange(spaceshipModels);
+            }
+            else if (spaceshipModels.Count > 0)
+            {
+                foreach (MobyModel model in spaceshipModels)
+                {
+                    foreach (TextureConfig conf in model.textureConfig)
+                        conf.id = spaceshipTextureBaseIndex;
+                }
+
+                MobyModel defaultShipModel = spaceshipModels[0];
+
+                spaceShipRc23Model = (MobyModel?) mobyModels.Find(x => x.id == SpaceshipHeader.RAC23_SPACESHIP_OCLASS);
+
+                if (spaceShipRc23Model == null)
+                {
+                    spaceShipRc23Model = new MobyModel { id = SpaceshipHeader.RAC23_SPACESHIP_OCLASS };
+                    mobyModels.Add(spaceShipRc23Model);
+                }
+
+                spaceShipRc23Model.ReplaceMeshData(defaultShipModel);
+                spaceshipBodyVariant = 0;
+            }
+
+            List<short> spaceshipAttachmentModelIDs = SpaceshipParser.GetAllSpaceshipAttachmentModelIDs(game);
+            spaceshipAttachmentModels.Clear();
+
+            foreach (short modelID in spaceshipAttachmentModelIDs)
+            {
+                Model? model = mobyModels.Find(x => x.id == modelID);
+
+                if (model != null)
+                {
+                    foreach (TextureConfig conf in model.textureConfig)
+                        conf.id = spaceshipTextureBaseIndex;
+
+                    spaceshipAttachmentModels.Add(model);
+                }
+            }
+
+            textures.AddRange(spaceshipTextures);
+
+            emplacedState = true;
+        }
+
+        public bool SetSpaceshipTextureVariant(Model shipModel, int variant)
+        {
+            if (!emplacedState) return false;
+            if (spaceshipTextureBaseIndex < 0) return false;
+            if (variant < 0 || variant >= spaceshipTextures.Count) return false;
+
+            bool isKnownModel = ReferenceEquals(shipModel, spaceShipRc23Model)
+                || spaceshipModels.Contains(shipModel)
+                || spaceshipAttachmentModels.Contains(shipModel);
+
+            if (!isKnownModel) return false;
+
+            int newId = spaceshipTextureBaseIndex + variant;
+            bool changed = false;
+
+            foreach (TextureConfig conf in shipModel.textureConfig)
+            {
+                if (conf.id != newId)
+                {
+                    conf.id = newId;
+                    changed = true;
+                }
+            }
+
+            return changed;
+        }
+        public bool SetSpaceshipTextureVariantForWholeShip(int variant)
+        {
+            IEnumerable<Model> targets;
+
+            if (spaceShipRc23Model != null)
+                targets = new[] { spaceShipRc23Model };
+            else
+                targets = spaceshipModels;
+
+            bool changed = false;
+            foreach (Model model in targets.Concat(spaceshipAttachmentModels))
+            {
+                changed |= SetSpaceshipTextureVariant(model, variant);
+            }
+
+            return changed;
+        }
+        public int GetSpaceshipTextureVariant(Model shipModel)
+        {
+            if (!emplacedState) return -1;
+            if (spaceshipTextureBaseIndex < 0) return -1;
+            if (shipModel.textureConfig.Count == 0) return -1;
+
+            int variant = shipModel.textureConfig[0].id - spaceshipTextureBaseIndex;
+            if (variant < 0 || variant >= spaceshipTextures.Count) return -1;
+
+            return variant;
+        }
+        public bool SetSpaceshipBodyVariant(int bodyVariant)
+        {
+            bool canApply = emplacedState
+                && spaceShipRc23Model != null
+                && bodyVariant >= 0 && bodyVariant < spaceshipModels.Count
+                && bodyVariant != spaceshipBodyVariant;
+
+            if (!canApply)
+                return false;
+
+            int currentTextureVariant = GetSpaceshipTextureVariant(spaceShipRc23Model!);
+
+            spaceShipRc23Model!.ReplaceMeshData(spaceshipModels[bodyVariant]);
+            spaceshipBodyVariant = bodyVariant;
+
+            if (currentTextureVariant >= 0)
+                SetSpaceshipTextureVariant(spaceShipRc23Model, currentTextureVariant);
+
+            return true;
+        }
+
+        public void Dispose()
+        {
+            if (textures != null) foreach (var tex in textures) tex?.Dispose();
+            if (armorTextures != null) foreach (var list in armorTextures) { if (list != null) foreach (var tex in list) tex?.Dispose(); }
+            if (gadgetTextures != null) foreach (var tex in gadgetTextures) tex?.Dispose();
+            if (mobyloadTextures != null) foreach (var list in mobyloadTextures) { if (list != null) foreach (var tex in list) tex?.Dispose(); }
+            if (missions != null) foreach (var mission in missions) { if (mission?.textures != null) foreach (var tex in mission.textures) tex?.Dispose(); }
+        }
+
+        public void Save(string outputFile)
+        {
+            Utilities.DebugAssert(emplacedState == false, "Level may not be saved in an emplaced state.");
+
+            string? directory;
+            if (File.Exists(outputFile) && File.GetAttributes(outputFile).HasFlag(FileAttributes.Directory))
+            {
+                directory = outputFile;
+            }
+            else if (Directory.Exists(outputFile))
+            {
+                directory = outputFile;
+            }
+            else
+            {
+                directory = Path.GetDirectoryName(outputFile);
+            }
+
+            if (directory == null) return;
+
+            EngineSerializer engineSerializer = new EngineSerializer();
+            engineSerializer.Save(this, directory);
+            GameplaySerializer gameplaySerializer = new GameplaySerializer();
+            gameplaySerializer.Save(this, directory);
+
+            for (int i = 0; i < terrainChunks.Count; i++)
+            {
+                ChunkSerializer chunkSerializer = new ChunkSerializer();
+                chunkSerializer.Save(this, directory, i);
+            }
+        }
+    }
+}
